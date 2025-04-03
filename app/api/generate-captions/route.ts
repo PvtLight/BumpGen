@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleAuth } from "google-auth-library";
-import fs from "fs";
-import path from "path";
+import { VertexAI } from "@google-cloud/vertexai";
 
 const MAX_TOKENS = 250;
 const TEMPERATURE = 1;
@@ -12,12 +11,19 @@ const MAX_RETRIES = 3;
 const initializeAuth = async () => {
   try {
     console.log("Initializing Google Auth client...");
-    const credentialsPath = path.join(
-      process.cwd(),
-      process.env.GOOGLE_APPLICATION_CREDENTIALS || ""
+    const credentialsBase64 = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+    if (!credentialsBase64) {
+      throw new Error(
+        "GOOGLE_APPLICATION_CREDENTIALS environment variable is not set"
+      );
+    }
+
+    // Decode base64 credentials
+    const credentials = JSON.parse(
+      Buffer.from(credentialsBase64, "base64").toString()
     );
-    console.log("Reading credentials from:", credentialsPath);
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath, "utf8"));
+
     console.log("Project ID:", credentials.project_id);
 
     const auth = new GoogleAuth({
@@ -45,7 +51,7 @@ const predict = async (instance: any) => {
     }
     console.log("Using endpoint:", process.env.ENDPOINT_NAME);
 
-    // Create the request body exactly like the Python code
+    // Create the request body
     const requestBody = {
       instances: [
         {
