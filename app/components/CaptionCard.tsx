@@ -8,12 +8,14 @@ interface CaptionCardProps {
   imageUrl: string;
   captions: string[];
   isLoading?: boolean;
+  googleSheetsUrl?: string;
 }
 
 export default function CaptionCard({
   imageUrl,
   captions,
   isLoading = false,
+  googleSheetsUrl,
 }: CaptionCardProps) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -36,6 +38,16 @@ export default function CaptionCard({
           fill
           className='object-cover'
         />
+        {googleSheetsUrl && (
+          <a
+            href={googleSheetsUrl}
+            target='_blank'
+            rel='noopener noreferrer'
+            className='absolute top-2 right-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded-md text-sm font-medium shadow-md transition-colors'
+          >
+            View in Sheet
+          </a>
+        )}
       </div>
 
       <div className='p-4'>
