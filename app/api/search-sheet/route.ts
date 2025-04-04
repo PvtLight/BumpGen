@@ -39,6 +39,48 @@ const SHEET_NAMES_IDS: { [key: string]: string } = {
 
 const BASE_SHEET_URL =
   "https://docs.google.com/spreadsheets/d/1IBlBPFGDw19PhexlPowIbFw0xKleMDn8JCxrOM17ExA/edit";
+const SHEET_API_URL =
+  "https://script.google.com/macros/s/AKfycbzRm2IY4fBDPpjL0byutOm0T12TEUdVLvlzKr-81YI-92Vc0o1GB11bKXr8F5uGfgVE/exec";
+
+interface SheetResult {
+  sheet: string;
+  row: number;
+}
+
+async function searchInGoogleSheet(value: string, sheetId: string) {
+  try {
+    console.log("Searching for URL in sheet:", value);
+    const response = await fetch(
+      `${SHEET_API_URL}?value=${encodeURIComponent(value)}&sheetId=${sheetId}`
+    );
+    const data = await response.json();
+
+    if (data.error) {
+      console.error("Error:", data.error);
+      return null;
+    }
+
+    if (!data.results || !Array.isArray(data.results)) {
+      console.error("Invalid results format:", data);
+      return null;
+    }
+
+    // Log the full results for debugging
+    console.log("Search results:", data.results);
+
+    // Return the row number from the first result
+    if (data.results.length > 0 && data.results[0].row) {
+      console.log("Found row:", data.results[0].row);
+      return data.results[0].row;
+    }
+
+    console.log("No row found in results");
+    return null;
+  } catch (error) {
+    console.error("Error searching in Google Sheet:", error);
+    return null;
+  }
+}
 
 function extractNameFromUrl(url: string): string | null {
   console.log("Extracting name from URL:", url);
@@ -78,10 +120,13 @@ function extractNameFromUrl(url: string): string | null {
   return null;
 }
 
-function buildSheetUrl(sheetName: string): string {
+function buildSheetUrl(sheetName: string, row?: number): string {
   const sheetId = SHEET_NAMES_IDS[sheetName];
-  const url = `${BASE_SHEET_URL}?gid=${sheetId}#gid=${sheetId}`;
-  console.log("Built sheet URL:", url);
+  let url = `${BASE_SHEET_URL}?gid=${sheetId}#gid=${sheetId}`;
+  if (row) {
+    url += `&range=E${row}`;
+  }
+  console.log("Built sheet URL with range:", url);
   return url;
 }
 
@@ -108,7 +153,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const sheetUrl = buildSheetUrl(sheetName);
+    const sheetId = SHEET_NAMES_IDS[sheetName];
+    console.log("Searching in sheet:", sheetName, "with ID:", sheetId);
+    const row = await searchInGoogleSheet(imageUrl, sheetId);
+
+    if (row) {
+      console.log("Found row for URL:", row);
+    } else {
+      console.log("No row found for URL");
+    }
+
+    const sheetUrl = buildSheetUrl(sheetName, row);
     console.log("Returning sheet URL:", sheetUrl);
     return NextResponse.json({ sheetUrl });
   } catch (error) {
