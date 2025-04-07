@@ -1,4 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { google } from "googleapis";
+
+// Add environment variables type safety
+if (!process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+  throw new Error(
+    "GOOGLE_APPLICATION_CREDENTIALS environment variable is required"
+  );
+}
 
 const SHEET_NAMES_IDS: { [key: string]: string } = {
   "Alaya Paid": "2096299055",
@@ -38,9 +46,8 @@ const SHEET_NAMES_IDS: { [key: string]: string } = {
 };
 
 const BASE_SHEET_URL =
-  "https://docs.google.com/spreadsheets/d/1IBlBPFGDw19PhexlPowIbFw0xKleMDn8JCxrOM17ExA/edit";
-const SHEET_API_URL =
-  "https://script.google.com/macros/s/AKfycbzRm2IY4fBDPpjL0byutOm0T12TEUdVLvlzKr-81YI-92Vc0o1GB11bKXr8F5uGfgVE/exec";
+  "https://docs.google.com/spreadsheets/d/1r5Dnxq4LDwGTOadCyVXqEr-e0OgGNXK96Z74872w7Mc/edit";
+const SPREADSHEET_ID = "1r5Dnxq4LDwGTOadCyVXqEr-e0OgGNXK96Z74872w7Mc";
 
 interface SheetResult {
   sheet: string;
@@ -50,32 +57,89 @@ interface SheetResult {
 async function searchInGoogleSheet(value: string, sheetId: string) {
   try {
     console.log("Searching for URL in sheet:", value);
-    const response = await fetch(
-      `${SHEET_API_URL}?value=${encodeURIComponent(value)}&sheetId=${sheetId}`
+
+    // Decode base64 credentials from env
+    const credentialsJson = Buffer.from(
+      process.env.GOOGLE_APPLICATION_CREDENTIALS || "",
+      "base64"
+    ).toString();
+    const credentials = JSON.parse(credentialsJson);
+
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+    });
+
+    const sheets = google.sheets({ version: "v4", auth });
+
+    // Get the sheet name from the ID
+    const sheetName = Object.keys(SHEET_NAMES_IDS).find(
+      (key) => SHEET_NAMES_IDS[key] === sheetId
     );
-    const data = await response.json();
-
-    if (data.error) {
-      console.error("Error:", data.error);
+    if (!sheetName) {
+      console.error("Sheet name not found for ID:", sheetId);
       return null;
     }
 
-    if (!data.results || !Array.isArray(data.results)) {
-      console.error("Invalid results format:", data);
+    // Search in column B (index 4)
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!B:B`,
+    });
+
+    const values = response.data.values;
+    if (!values) {
+      console.log("No data found in sheet");
       return null;
     }
 
-    // Log the full results for debugging
-    console.log("Search results:", data.results);
+    // Log first few values for debugging
+    console.log("First few values in sheet:", values.slice(0, 5));
 
-    // Return the row number from the first result
-    if (data.results.length > 0 && data.results[0].row) {
-      console.log("Found row:", data.results[0].row);
-      return data.results[0].row;
+    // Clean up the search value and values from sheet for comparison
+    const cleanValue = value.trim().toLowerCase();
+
+    // Find the row with matching URL (1-based index)
+    const rowIndex = values.findIndex((row: string[]) => {
+      if (!row[0]) return false;
+      const sheetValue = row[0].trim().toLowerCase();
+      const matches = sheetValue === cleanValue;
+      if (matches) {
+        console.log("Found matching value:", sheetValue);
+      }
+      return matches;
+    });
+
+    if (rowIndex === -1) {
+      console.log("URL not found in sheet. Trying partial match...");
+
+      // Try partial match if exact match fails
+      const partialMatchIndex = values.findIndex((row: string[]) => {
+        if (!row[0]) return false;
+        const sheetValue = row[0].trim().toLowerCase();
+        // Extract the numeric ID from both URLs for comparison
+        const urlIdMatch = /\/(\d+)\?/.exec(cleanValue);
+        const sheetIdMatch = /\/(\d+)\?/.exec(sheetValue);
+        if (urlIdMatch && sheetIdMatch && urlIdMatch[1] === sheetIdMatch[1]) {
+          console.log("Found partial match with ID:", urlIdMatch[1]);
+          return true;
+        }
+        return false;
+      });
+
+      if (partialMatchIndex === -1) {
+        console.log("No partial match found either");
+        return null;
+      }
+
+      const rowNumber = partialMatchIndex + 1;
+      console.log("Found row (partial match):", rowNumber);
+      return rowNumber;
     }
 
-    console.log("No row found in results");
-    return null;
+    const rowNumber = rowIndex + 1; // Convert to 1-based index
+    console.log("Found row (exact match):", rowNumber);
+    return rowNumber;
   } catch (error) {
     console.error("Error searching in Google Sheet:", error);
     return null;
@@ -120,11 +184,11 @@ function extractNameFromUrl(url: string): string | null {
   return null;
 }
 
-function buildSheetUrl(sheetName: string, row?: number): string {
+function buildSheetUrl(sheetName: string, row: number | undefined): string {
   const sheetId = SHEET_NAMES_IDS[sheetName];
   let url = `${BASE_SHEET_URL}?gid=${sheetId}#gid=${sheetId}`;
   if (row) {
-    url += `&range=E${row}`;
+    url += `&range=F${row}`;
   }
   console.log("Built sheet URL with range:", url);
   return url;
@@ -157,13 +221,13 @@ export async function POST(req: NextRequest) {
     console.log("Searching in sheet:", sheetName, "with ID:", sheetId);
     const row = await searchInGoogleSheet(imageUrl, sheetId);
 
-    if (row) {
+    if (row !== null) {
       console.log("Found row for URL:", row);
     } else {
       console.log("No row found for URL");
     }
 
-    const sheetUrl = buildSheetUrl(sheetName, row);
+    const sheetUrl = buildSheetUrl(sheetName, row || undefined);
     console.log("Returning sheet URL:", sheetUrl);
     return NextResponse.json({ sheetUrl });
   } catch (error) {
